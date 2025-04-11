@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 
 	"telegrambot_supabase/internal/bot"
@@ -13,46 +14,38 @@ import (
 )
 
 func main() {
-	// Загрузить .env
-	err := godotenv.Load()
-	if err != nil {
-		log.Println("⚠️ .env не найден, продолжаем без него")
-	}
-
-	// Подключение к Supabase
+	godotenv.Load()
 	conn := db.InitDB()
 	defer conn.Close(context.Background())
 
-	// Telegram API
 	botToken := os.Getenv("TELEGRAM_TOKEN")
-	if botToken == "" {
-		log.Fatal("TELEGRAM_TOKEN не указан в .env")
-	}
+	publicURL := os.Getenv("PUBLIC_URL") // например: https://your-app.onrender.com
 
 	botAPI, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
-		log.Fatalf("Ошибка создания бота: %v", err)
+		log.Fatal(err)
 	}
 
-	botAPI.Debug = true
-	log.Printf("✅ Авторизован как %s", botAPI.Self.UserName)
-
-	// Установить команды в Telegram
-	commands := []tgbotapi.BotCommand{
-		{Command: "start", Description: "Начать работу"},
-		{Command: "students", Description: "Список учеников и управление"},
-	}
-
-	_, err = botAPI.Request(tgbotapi.NewSetMyCommands(commands...))
+	// Устанавливаем webhook
+	webhookURL := publicURL + "/webhook"
+	webhook, err := tgbotapi.NewWebhook(webhookURL)
 	if err != nil {
-		log.Printf("⚠️ Не удалось установить команды: %v", err)
+		log.Fatalf("Ошибка установки Webhook: %v", err)
+	}
+	_, err = botAPI.Request(webhook)
+	if err != nil {
+		log.Fatalf("Ошибка установки Webhook: %v", err)
 	}
 
-	// Получение обновлений
-	updateCfg := tgbotapi.NewUpdate(0)
-	updateCfg.Timeout = 60
+	// HTTP handler
+	updates := botAPI.ListenForWebhook("/webhook")
 
-	updates := botAPI.GetUpdatesChan(updateCfg)
+	go func() {
+		log.Println("Запускаем сервер на :8080...")
+		if err := http.ListenAndServe(":8080", nil); err != nil {
+			log.Fatal(err)
+		}
+	}()
 
 	for update := range updates {
 		if update.CallbackQuery != nil {
